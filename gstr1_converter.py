@@ -155,35 +155,15 @@ def extract_flat_list(data, key, base_meta):
     return rows
 
 
-def main():
-    folder_path = '/Users/arvind/Downloads/JSON FILES/all_json'
-    output_file = '/Users/arvind/Downloads/JSON FILES/GSTR1_Consolidated.xlsx'
-    
-    file_list = glob.glob(os.path.join(folder_path, '*.json'))
-    if not file_list:
-        print(f"No JSON files found in {folder_path}.")
-        return
-
-    print(f"Found {len(file_list)} JSON files. Starting processing...")
-    
-    # Dictionary to hold lists of rows for each section
+def process_json_data_to_excel(json_files_data, output_target):
+    """
+    json_files_data: list of tuples -> (filename, parsed_dict)
+    output_target: file path string OR BytesIO buffer
+    """
     all_data = defaultdict(list)
-    
     start_time = time.time()
     
-    for i, file_path in enumerate(file_list, 1):
-        filename = os.path.basename(file_path)
-        
-        if i % 10 == 0 or i == len(file_list):
-            print(f"Processing file {i}/{len(file_list)}: {filename}")
-            
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception as e:
-            print(f"  [ERROR] Cannot read or parse {filename}: {e}. Skipping.")
-            continue
-            
+    for filename, data in json_files_data:
         # Top-level meta
         gstin = data.get('gstin', '')
         fp = data.get('fp', '')
@@ -217,10 +197,8 @@ def main():
             if key in data:
                 all_data[key.upper()].extend(extract_flat_list(data, key, base_meta))
 
-    print(f"\nFinished parsing {len(file_list)} files in {time.time() - start_time:.2f} seconds.")
-    print("Converting sections to DataFrames...")
+    print(f"\nFinished parsing {len(json_files_data)} files in {time.time() - start_time:.2f} seconds.")
     
-    # Convert to DataFrames
     dfs = {}
     summary_data = []
     
@@ -233,31 +211,41 @@ def main():
                 'Row_Count': len(df)
             })
             
-    # Add summary DataFrame
     if summary_data:
         summary_df = pd.DataFrame(summary_data)
         summary_df.loc['Total'] = summary_df.sum(numeric_only=True)
         summary_df.at['Total', 'Section'] = 'TOTAL'
         dfs['Summary'] = summary_df
     
-    print(f"Writing to Excel file: {output_file}...")
-    try:
-        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            # Write summary first
-            if 'Summary' in dfs:
-                dfs['Summary'].to_excel(writer, sheet_name='Summary', index=False)
-            
-            # Write other sections
-            for section, df in dfs.items():
-                if section != 'Summary':
-                    # Truncate sheet names to 31 chars as per Excel limit
-                    sheet_name = section[:31]
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
-                    
-        print("\nSUCCESS! Excel file generated successfully.")
-    except Exception as e:
-        print(f"\n[ERROR] Failed to write Excel file: {e}")
-        print("Please ensure you have openpyxl installed (pip install openpyxl).")
+    with pd.ExcelWriter(output_target, engine='openpyxl') as writer:
+        if 'Summary' in dfs:
+            dfs['Summary'].to_excel(writer, sheet_name='Summary', index=False)
+        for section, df in dfs.items():
+            if section != 'Summary':
+                sheet_name = section[:31]
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+    
+    return dfs
+
+def main():
+    folder_path = '/Users/arvind/Downloads/JSON FILES/all_json'
+    output_file = 'GSTR1_Consolidated.xlsx'
+    
+    file_list = glob.glob(os.path.join(folder_path, '*.json'))
+    if not file_list:
+        print("No JSON files found in all_json directory.")
+        return
+
+    json_data = []
+    for file_path in file_list:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                json_data.append((os.path.basename(file_path), json.load(f)))
+        except Exception as e:
+            print(f"Skipping {file_path}: {e}")
+
+    process_json_data_to_excel(json_data, output_file)
+    print("SUCCESS! Excel file generated locally.")
 
 if __name__ == "__main__":
     main()
